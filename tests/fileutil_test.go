@@ -156,3 +156,77 @@ func createTestZip(zipPath string) error {
 
 	return nil
 }
+
+func TestApplyIgnorePatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create .lancherignore
+	ignoreContent := "node_modules\n*.log\n"
+	os.WriteFile(filepath.Join(tmpDir, ".lancherignore"), []byte(ignoreContent), 0644)
+
+	// Create files and directories
+	os.MkdirAll(filepath.Join(tmpDir, "node_modules", "pkg"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "node_modules", "pkg", "index.js"), []byte("module"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "app.log"), []byte("log data"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main"), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "src", "server.log"), []byte("nested log"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "handler.go"), []byte("handler"), 0644)
+
+	err := fileutil.ApplyIgnorePatterns(tmpDir)
+	if err != nil {
+		t.Fatalf("ApplyIgnorePatterns failed: %v", err)
+	}
+
+	// node_modules should be removed
+	if _, err := os.Stat(filepath.Join(tmpDir, "node_modules")); !os.IsNotExist(err) {
+		t.Error("node_modules should be removed")
+	}
+
+	// app.log should be removed
+	if _, err := os.Stat(filepath.Join(tmpDir, "app.log")); !os.IsNotExist(err) {
+		t.Error("app.log should be removed")
+	}
+
+	// src/server.log should be removed (recursive)
+	if _, err := os.Stat(filepath.Join(tmpDir, "src", "server.log")); !os.IsNotExist(err) {
+		t.Error("src/server.log should be removed")
+	}
+
+	// main.go should remain
+	if _, err := os.Stat(filepath.Join(tmpDir, "main.go")); os.IsNotExist(err) {
+		t.Error("main.go should remain")
+	}
+
+	// src/handler.go should remain
+	if _, err := os.Stat(filepath.Join(tmpDir, "src", "handler.go")); os.IsNotExist(err) {
+		t.Error("src/handler.go should remain")
+	}
+}
+
+func TestCopyDirRespectsLancherIgnore(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create source directory
+	srcDir := filepath.Join(tmpDir, "source")
+	os.MkdirAll(filepath.Join(srcDir, "node_modules", "pkg"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "node_modules", "pkg", "index.js"), []byte("module"), 0644)
+	os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0644)
+	os.WriteFile(filepath.Join(srcDir, ".lancherignore"), []byte("node_modules\n"), 0644)
+
+	// Copy directory
+	dstDir := filepath.Join(tmpDir, "dest")
+	if err := fileutil.CopyDir(srcDir, dstDir); err != nil {
+		t.Fatalf("CopyDir() failed: %v", err)
+	}
+
+	// node_modules should not be copied
+	if _, err := os.Stat(filepath.Join(dstDir, "node_modules")); !os.IsNotExist(err) {
+		t.Error("node_modules should not be copied (ignored by .lancherignore)")
+	}
+
+	// main.go should be copied
+	if _, err := os.Stat(filepath.Join(dstDir, "main.go")); os.IsNotExist(err) {
+		t.Error("main.go should be copied")
+	}
+}
