@@ -212,6 +212,11 @@ func Run(args []string) error {
 		return shared.FormatError(fmt.Sprintf("failed to load template config: %v", err))
 	}
 
+	// Warn about deprecated 'ignore' field in config YAML
+	if cfg != nil && cfg.HasIgnore() {
+		fmt.Printf("%s⚠ Warning:%s The 'ignore' field in lancher.yml is deprecated. Use a .lancherignore file instead.%s\n", shared.ColorYellow, shared.ColorReset, shared.ColorReset)
+	}
+
 	// Display template metadata if available
 	if cfg != nil {
 		metadata := cfg.GetMetadata()
@@ -314,6 +319,10 @@ func Run(args []string) error {
 
 // copyTemplate copies template directory respecting ignore patterns
 func copyTemplate(srcPath, dstPath string, cfg *config.Config) error {
+	// Load .lancherignore patterns (takes priority over config ignore)
+	ignorePatterns := fileutil.LoadIgnoreFile(srcPath)
+	useLancherIgnore := len(ignorePatterns) > 0
+
 	return filepath.Walk(srcPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -333,6 +342,11 @@ func copyTemplate(srcPath, dstPath string, cfg *config.Config) error {
 			}
 		}
 
+		// Skip .lancherignore file (never copy to destination)
+		if fileName == fileutil.IgnoreFileName {
+			return nil
+		}
+
 		// Skip .git directory (always excluded from templates)
 		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
 			if info.IsDir() {
@@ -341,8 +355,15 @@ func copyTemplate(srcPath, dstPath string, cfg *config.Config) error {
 			return nil
 		}
 
-		// Check ignore patterns
-		if cfg != nil && cfg.ShouldIgnore(relPath) {
+		// Check ignore patterns: .lancherignore takes priority, fallback to config ignore
+		if useLancherIgnore {
+			if fileutil.ShouldIgnorePath(relPath, ignorePatterns) {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		} else if cfg != nil && cfg.ShouldIgnore(relPath) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

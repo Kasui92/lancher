@@ -199,6 +199,18 @@ func TestHasHooks(t *testing.T) {
 	}
 }
 
+func TestHasIgnore(t *testing.T) {
+	cfg := &config.Config{Ignore: []string{"node_modules"}}
+	if !cfg.HasIgnore() {
+		t.Error("HasIgnore() should return true when ignore patterns exist")
+	}
+
+	var nilCfg *config.Config
+	if nilCfg.HasIgnore() {
+		t.Error("HasIgnore() should return false for nil config")
+	}
+}
+
 func TestGetMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
