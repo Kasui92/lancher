@@ -10,7 +10,11 @@ import (
 	"strings"
 )
 
-// shouldIgnore checks if a file or directory should be ignored based on patterns
+// IgnoreFileName is the name of the .lancherignore file
+const IgnoreFileName = ".lancherignore"
+
+// shouldIgnore checks if a file or directory name should be ignored based on patterns.
+// Used internally by CopyDir where matching is done on entry names only.
 func shouldIgnore(name string, patterns []string) bool {
 	for _, pattern := range patterns {
 		// Exact match
@@ -29,9 +33,39 @@ func shouldIgnore(name string, patterns []string) bool {
 	return false
 }
 
-// loadIgnoreFile loads ignore patterns from a .lancherignore file if it exists
-func loadIgnoreFile(srcDir string) []string {
-	ignoreFile := filepath.Join(srcDir, ".lancherignore")
+// ShouldIgnorePath checks if a relative path should be ignored based on patterns.
+// It matches against both the full relative path and the basename, supporting
+// exact match and glob patterns. Used during project creation (copyTemplate).
+func ShouldIgnorePath(relativePath string, patterns []string) bool {
+	for _, pattern := range patterns {
+		// Exact match on full path
+		if relativePath == pattern {
+			return true
+		}
+
+		// Exact match on basename
+		baseName := filepath.Base(relativePath)
+		if baseName == pattern {
+			return true
+		}
+
+		// Glob match on full path and basename
+		if strings.Contains(pattern, "*") {
+			if matched, _ := filepath.Match(pattern, relativePath); matched {
+				return true
+			}
+			if matched, _ := filepath.Match(pattern, baseName); matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// LoadIgnoreFile loads ignore patterns from a .lancherignore file if it exists in the given directory.
+// Returns an empty slice if the file does not exist or cannot be read.
+func LoadIgnoreFile(srcDir string) []string {
+	ignoreFile := filepath.Join(srcDir, IgnoreFileName)
 	file, err := os.Open(ignoreFile)
 	if err != nil {
 		// File doesn't exist or can't be read, return empty slice
@@ -52,6 +86,82 @@ func loadIgnoreFile(srcDir string) []string {
 	return patterns
 }
 
+// ApplyIgnorePatterns reads the .lancherignore file from dir and removes matching files/directories.
+// Used after git clone or ZIP extraction to apply ignore rules retroactively.
+func ApplyIgnorePatterns(dir string) error {
+	patterns := LoadIgnoreFile(dir)
+	if len(patterns) == 0 {
+		return nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if shouldIgnore(name, patterns) {
+			path := filepath.Join(dir, name)
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("failed to remove ignored path %s: %w", path, err)
+			}
+		}
+	}
+
+	// Recurse into remaining subdirectories
+	entries, err = os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to re-read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(dir, entry.Name())
+			if err := applyIgnorePatternsRecursive(subDir, patterns); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// applyIgnorePatternsRecursive removes entries matching patterns within subdirectories
+func applyIgnorePatternsRecursive(dir string, patterns []string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if shouldIgnore(name, patterns) {
+			path := filepath.Join(dir, name)
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("failed to remove ignored path %s: %w", path, err)
+			}
+		}
+	}
+
+	// Re-read and recurse into remaining subdirectories
+	entries, err = os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to re-read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(dir, entry.Name())
+			if err := applyIgnorePatternsRecursive(subDir, patterns); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // CopyDir recursively copies a directory from src to dst
 func CopyDir(src, dst string) error {
 	// Get source directory info
@@ -65,7 +175,7 @@ func CopyDir(src, dst string) error {
 	}
 
 	// Load ignore patterns from .lancherignore file if it exists
-	ignorePatterns := loadIgnoreFile(src)
+	ignorePatterns := LoadIgnoreFile(src)
 
 	return copyDirWithIgnore(src, dst, src, ignorePatterns)
 }

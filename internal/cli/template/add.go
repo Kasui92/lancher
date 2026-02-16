@@ -199,6 +199,14 @@ func RunAdd(args []string) error {
 			return shared.FormatError(fmt.Sprintf("Failed to clone repository: %v", err))
 		}
 
+		// Apply .lancherignore patterns after cloning
+		if err := fileutil.ApplyIgnorePatterns(destPath); err != nil {
+			if spinner != nil {
+				spinner.Fail(fmt.Sprintf("Failed to apply ignore patterns: %v", err))
+			}
+			return shared.FormatError(fmt.Sprintf("Failed to apply ignore patterns: %v", err))
+		}
+
 		if spinner != nil {
 			spinner.Success(fmt.Sprintf("Template '%s' added from git repository", name))
 		} else {
@@ -230,6 +238,14 @@ func RunAdd(args []string) error {
 				spinner.Fail(fmt.Sprintf("Failed to extract ZIP: %v", err))
 			}
 			return shared.FormatError(fmt.Sprintf("Failed to extract ZIP: %v", err))
+		}
+
+		// Apply .lancherignore patterns after extraction
+		if err := fileutil.ApplyIgnorePatterns(destPath); err != nil {
+			if spinner != nil {
+				spinner.Fail(fmt.Sprintf("Failed to apply ignore patterns: %v", err))
+			}
+			return shared.FormatError(fmt.Sprintf("Failed to apply ignore patterns: %v", err))
 		}
 
 		if spinner != nil {
@@ -310,6 +326,14 @@ func cloneWithAlias(name, repoPath, destPath, cliCmd, baseURL string, verbose bo
 			spinner.Fail(fmt.Sprintf("Failed to clone repository: %v", err))
 		}
 		return shared.FormatError(fmt.Sprintf("Failed to clone repository: %v", err))
+	}
+
+	// Apply .lancherignore patterns after cloning
+	if err := fileutil.ApplyIgnorePatterns(destPath); err != nil {
+		if spinner != nil {
+			spinner.Fail(fmt.Sprintf("Failed to apply ignore patterns: %v", err))
+		}
+		return shared.FormatError(fmt.Sprintf("Failed to apply ignore patterns: %v", err))
 	}
 
 	if spinner != nil {

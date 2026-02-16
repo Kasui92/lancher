@@ -100,6 +100,11 @@ func (c *Config) HasHooks() bool {
 	return c != nil && len(c.Hooks) > 0
 }
 
+// HasIgnore returns true if config has deprecated ignore patterns defined in YAML
+func (c *Config) HasIgnore() bool {
+	return c != nil && len(c.Ignore) > 0
+}
+
 // GetMetadata returns formatted metadata string for display
 func (c *Config) GetMetadata() string {
 	if c == nil {
