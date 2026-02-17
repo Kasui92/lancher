@@ -204,15 +204,25 @@ func TestApplyIgnorePatterns(t *testing.T) {
 	}
 }
 
+// TestCopyDirRespectsLancherIgnore verifies that CopyDir integrates with .lancherignore
+// This is a basic integration test to ensure the ignore mechanism works end-to-end.
 func TestCopyDirRespectsLancherIgnore(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create source directory
+	// Create source directory with various files
 	srcDir := filepath.Join(tmpDir, "source")
 	os.MkdirAll(filepath.Join(srcDir, "node_modules", "pkg"), 0755)
 	os.WriteFile(filepath.Join(srcDir, "node_modules", "pkg", "index.js"), []byte("module"), 0644)
 	os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0644)
-	os.WriteFile(filepath.Join(srcDir, ".lancherignore"), []byte("node_modules\n"), 0644)
+	os.WriteFile(filepath.Join(srcDir, "test.log"), []byte("log"), 0644)
+	os.MkdirAll(filepath.Join(srcDir, "src"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "src", "handler.go"), []byte("handler"), 0644)
+
+	// Create .lancherignore with basic patterns
+	ignoreContent := `node_modules
+*.log
+`
+	os.WriteFile(filepath.Join(srcDir, ".lancherignore"), []byte(ignoreContent), 0644)
 
 	// Copy directory
 	dstDir := filepath.Join(tmpDir, "dest")
@@ -220,13 +230,19 @@ func TestCopyDirRespectsLancherIgnore(t *testing.T) {
 		t.Fatalf("CopyDir() failed: %v", err)
 	}
 
-	// node_modules should not be copied
+	// Verify ignored items are not copied
 	if _, err := os.Stat(filepath.Join(dstDir, "node_modules")); !os.IsNotExist(err) {
 		t.Error("node_modules should not be copied (ignored by .lancherignore)")
 	}
+	if _, err := os.Stat(filepath.Join(dstDir, "test.log")); !os.IsNotExist(err) {
+		t.Error("test.log should not be copied (*.log pattern)")
+	}
 
-	// main.go should be copied
+	// Verify non-ignored items are copied
 	if _, err := os.Stat(filepath.Join(dstDir, "main.go")); os.IsNotExist(err) {
 		t.Error("main.go should be copied")
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, "src", "handler.go")); os.IsNotExist(err) {
+		t.Error("src/handler.go should be copied")
 	}
 }
