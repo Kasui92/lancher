@@ -9,17 +9,32 @@
 # Syntax:
 # - One pattern per line
 # - Lines starting with # are comments
-# - Supports wildcards (e.g., *.log, *.tmp)
-# - Exact directory or file names (e.g., node_modules, .env)
+# - Blank lines are ignored
+#
+# Pattern matching rules:
+# - Exact match: node_modules (matches file or directory named "node_modules")
+# - Trailing slash: node_modules/ (matches only directories)
+# - Wildcard *: *.log (matches any file ending with .log)
+# - Wildcard ?: file.? (matches file.a, file.b, etc.)
+# - Recursive **: **/node_modules (matches node_modules at any depth)
+# - Root pattern: /config (only matches "config" at the root, not "src/config")
+#
+# Examples:
+# node_modules      → matches "node_modules" directory anywhere
+# node_modules/     → same as above (trailing slash indicates directory)
+# *.log             → matches all .log files
+# /build            → only matches "build" at project root
+# **/dist           → matches "dist" at any directory depth
+# temp*             → matches temp, temp1, tempfile, etc.
 #
 # NOTE: By default, NO files or directories are ignored.
 # You must explicitly list what you want to exclude.
 
 # Common patterns you might want to ignore:
 
-# Dependencies
-node_modules
-vendor
+# Dependencies (trailing / is optional but clarifies these are directories)
+node_modules/
+vendor/
 
 # Version control
 .git
@@ -27,29 +42,30 @@ vendor
 .hg
 
 # Build outputs
-dist
-build
-target
-.next
-.nuxt
+dist/
+build/
+target/
+.next/
+.nuxt/
+out/
 
 # Python
-__pycache__
+__pycache__/
 *.pyc
-.venv
-venv
-env
-.pytest_cache
-.tox
+.venv/
+venv/
+env/
+.pytest_cache/
+.tox/
 
 # Cache directories
-.cache
-.parcel-cache
-.turbo
+.cache/
+.parcel-cache/
+.turbo/
 
 # IDE and editor files
-.idea
-.vscode
+.idea/
+.vscode/
 *.swp
 *.swo
 *~
@@ -66,7 +82,9 @@ secrets.json
 
 # Logs
 *.log
+logs/
 
 # Temporary files
 *.tmp
 *.bak
+tmp/
