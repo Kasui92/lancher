@@ -13,19 +13,59 @@ import (
 // IgnoreFileName is the name of the .lancherignore file
 const IgnoreFileName = ".lancherignore"
 
+// ignorePattern represents a normalized ignore pattern with pre-computed properties
+type ignorePattern struct {
+	raw        string // Original pattern
+	normalized string // Normalized pattern (no leading/trailing slashes)
+	isRoot     bool   // Pattern starts with /
+	isRecursive bool  // Pattern contains **
+	hasWildcard bool  // Pattern contains * or ?
+}
+
+// parsePattern parses and normalizes a pattern string
+func parsePattern(raw string) ignorePattern {
+	pattern := strings.TrimSpace(raw)
+	isRoot := strings.HasPrefix(pattern, "/")
+	pattern = strings.TrimPrefix(pattern, "/")
+	pattern = strings.TrimSuffix(pattern, "/")
+
+	return ignorePattern{
+		raw:         raw,
+		normalized:  pattern,
+		isRoot:      isRoot,
+		isRecursive: strings.Contains(pattern, "**"),
+		hasWildcard: strings.ContainsAny(pattern, "*?"),
+	}
+}
+
 // shouldIgnore checks if a file or directory name should be ignored based on patterns.
 // Used internally by CopyDir where matching is done on entry names only.
 func shouldIgnore(name string, patterns []string) bool {
-	for _, pattern := range patterns {
+	for _, raw := range patterns {
+		if raw == "" {
+			continue
+		}
+
+		p := parsePattern(raw)
+		pattern := p.normalized
+
+		if pattern == "" {
+			continue
+		}
+
+		// Handle recursive patterns - simplified for name matching
+		if p.isRecursive {
+			pattern = strings.ReplaceAll(pattern, "**", "*")
+		}
+
 		// Exact match
 		if name == pattern {
 			return true
 		}
 
-		// Wildcard pattern (simple glob)
-		if strings.Contains(pattern, "*") {
-			matched, _ := filepath.Match(pattern, name)
-			if matched {
+		// Wildcard pattern (glob)
+		if strings.ContainsAny(pattern, "*?") {
+			if matched, _ := filepath.Match(pattern, name); matched {
 				return true
 			}
 		}
@@ -36,34 +76,146 @@ func shouldIgnore(name string, patterns []string) bool {
 // ShouldIgnorePath checks if a relative path should be ignored based on patterns.
 // It matches against both the full relative path and the basename, supporting
 // exact match and glob patterns. Used during project creation (copyTemplate).
+// Supports patterns with trailing slashes, ** for recursive matching, and / prefix for root-only matches.
 func ShouldIgnorePath(relativePath string, patterns []string) bool {
-	for _, pattern := range patterns {
-		// Exact match on full path
-		if relativePath == pattern {
+	// Pre-compute path components once
+	var pathParts []string
+	var baseName string
+	computedParts := false
+
+	for _, raw := range patterns {
+		if raw == "" {
+			continue
+		}
+
+		p := parsePattern(raw)
+		pattern := p.normalized
+
+		if pattern == "" {
+			continue
+		}
+
+		// Lazy compute path parts only when needed
+		if !computedParts {
+			pathParts = strings.Split(relativePath, string(filepath.Separator))
+			baseName = filepath.Base(relativePath)
+			computedParts = true
+		}
+
+		// Handle recursive patterns (**)
+		if p.isRecursive {
+			if matched := matchRecursivePattern(pattern, relativePath, baseName, pathParts); matched {
+				return true
+			}
+			continue
+		}
+
+		// Root-relative pattern (starts with /)
+		if p.isRoot {
+			if relativePath == pattern || strings.HasPrefix(relativePath, pattern+string(filepath.Separator)) {
+				return true
+			}
+			if p.hasWildcard {
+				if matched, _ := filepath.Match(pattern, relativePath); matched {
+					return true
+				}
+			}
+			continue
+		}
+
+		// Exact matches
+		if relativePath == pattern || baseName == pattern {
 			return true
 		}
 
-		// Exact match on basename
-		baseName := filepath.Base(relativePath)
-		if baseName == pattern {
-			return true
+		// Match if pattern appears anywhere in the path (for directories)
+		for _, part := range pathParts {
+			if part == pattern {
+				return true
+			}
 		}
 
-		// Glob match on full path and basename
-		if strings.Contains(pattern, "*") {
+		// Wildcard/glob matching
+		if p.hasWildcard {
+			// Match against full path
 			if matched, _ := filepath.Match(pattern, relativePath); matched {
 				return true
 			}
+			// Match against basename
 			if matched, _ := filepath.Match(pattern, baseName); matched {
 				return true
+			}
+			// Match against any path component
+			for _, part := range pathParts {
+				if matched, _ := filepath.Match(pattern, part); matched {
+					return true
+				}
 			}
 		}
 	}
 	return false
 }
 
+// matchRecursivePattern handles matching of patterns containing ** (recursive wildcards)
+func matchRecursivePattern(pattern, relativePath, baseName string, pathParts []string) bool {
+	parts := strings.Split(pattern, "**")
+	if len(parts) != 2 {
+		return false
+	}
+
+	prefix := strings.TrimSuffix(parts[0], "/")
+	suffix := strings.TrimPrefix(parts[1], "/")
+
+	switch {
+	case prefix == "" && suffix != "":
+		// **/suffix pattern (e.g., **/node_modules or **/*.pyc)
+		if strings.ContainsAny(suffix, "*?") {
+			// Wildcard suffix - check against basename and all path components
+			if matched, _ := filepath.Match(suffix, baseName); matched {
+				return true
+			}
+			if matched, _ := filepath.Match(suffix, relativePath); matched {
+				return true
+			}
+			for _, part := range pathParts {
+				if matched, _ := filepath.Match(suffix, part); matched {
+					return true
+				}
+			}
+		} else {
+			// Exact suffix - check if path ends with it or basename matches
+			if strings.HasSuffix(relativePath, suffix) || baseName == suffix {
+				return true
+			}
+			// Also check each path component
+			for _, part := range pathParts {
+				if part == suffix {
+					return true
+				}
+			}
+		}
+
+	case prefix != "" && suffix == "":
+		// prefix/** pattern - matches everything under prefix
+		return strings.HasPrefix(relativePath, prefix) || strings.Contains(relativePath, prefix+string(filepath.Separator))
+
+	case prefix != "" && suffix != "":
+		// prefix/**/suffix pattern - check both parts exist in path
+		return strings.Contains(relativePath, prefix) && strings.Contains(relativePath, suffix)
+	}
+
+	return false
+}
+
 // LoadIgnoreFile loads ignore patterns from a .lancherignore file if it exists in the given directory.
 // Returns an empty slice if the file does not exist or cannot be read.
+// Supported pattern syntax:
+// - Lines starting with # are comments
+// - Trailing slashes indicate directories (e.g., node_modules/)
+// - Leading slashes match from root (e.g., /config)
+// - ** matches across directories (e.g., **/node_modules)
+// - * and ? wildcards supported
+// - ! to negate patterns (not yet implemented)
 func LoadIgnoreFile(srcDir string) []string {
 	ignoreFile := filepath.Join(srcDir, IgnoreFileName)
 	file, err := os.Open(ignoreFile)
@@ -77,10 +229,17 @@ func LoadIgnoreFile(srcDir string) []string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+
 		// Skip empty lines and comments
-		if line != "" && !strings.HasPrefix(line, "#") {
-			patterns = append(patterns, line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+
+		// Note: We keep the pattern as-is, including:
+		// - trailing slashes (will be handled in matching functions)
+		// - leading slashes (for root-relative patterns)
+		// - ** wildcards (for recursive matching)
+		patterns = append(patterns, line)
 	}
 
 	return patterns
