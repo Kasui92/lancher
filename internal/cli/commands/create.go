@@ -28,6 +28,8 @@ func RunCreateHelp() error {
 	fmt.Printf("    %s    --no-git%s              %sSkip git initialization prompt%s\n", shared.ColorGreen, shared.ColorReset, "", "")
 	fmt.Printf("    %s    --hooks%s               %sExecute hooks automatically (skip prompt)%s\n", shared.ColorGreen, shared.ColorReset, "", "")
 	fmt.Printf("    %s    --no-hooks%s            %sSkip hooks execution%s\n", shared.ColorGreen, shared.ColorReset, "", "")
+	fmt.Printf("    %s    --keep-config%s         %sKeep lancher config and ignore files in project%s\n", shared.ColorGreen, shared.ColorReset, "", "")
+	fmt.Printf("    %s    --no-keep-config%s      %sRemove lancher config and ignore files from project%s\n", shared.ColorGreen, shared.ColorReset, "", "")
 	fmt.Printf("    %s-p%s, %s--print%s               %sShow detailed output (no spinner)%s\n", shared.ColorGreen, shared.ColorReset, shared.ColorGreen, shared.ColorReset, "", "")
 	fmt.Printf("    %s-h%s, %s--help%s                %sShow this help message%s\n\n", shared.ColorGreen, shared.ColorReset, shared.ColorGreen, shared.ColorReset, "", "")
 
@@ -37,7 +39,7 @@ func RunCreateHelp() error {
 // runCreate creates a new project from a template
 func Run(args []string) error {
 	var templateName, destination string
-	var verbose, gitInit, noGit, executeHooks, noHooks bool
+	var verbose, gitInit, noGit, executeHooks, noHooks, keepConfig, noKeepConfig bool
 
 	// Parse flags
 	for i := 0; i < len(args); i++ {
@@ -64,6 +66,10 @@ func Run(args []string) error {
 			executeHooks = true
 		case "--no-hooks":
 			noHooks = true
+		case "--keep-config":
+			keepConfig = true
+		case "--no-keep-config":
+			noKeepConfig = true
 		case "-p", "--print":
 			verbose = true
 		default:
@@ -81,6 +87,9 @@ func Run(args []string) error {
 	}
 	if executeHooks && noHooks {
 		return shared.FormatError("cannot use both --hooks and --no-hooks flags")
+	}
+	if keepConfig && noKeepConfig {
+		return shared.FormatError("cannot use both --keep-config and --no-keep-config flags")
 	}
 
 	// Interactive mode if flags not provided
@@ -314,6 +323,45 @@ func Run(args []string) error {
 		}
 	}
 
+	// Handle lancher config and .lancherignore files in destination
+	var copiedMetaFiles []string
+	for _, cfgFile := range config.ConfigFileNames {
+		if _, err := os.Stat(filepath.Join(destAbs, cfgFile)); err == nil {
+			copiedMetaFiles = append(copiedMetaFiles, cfgFile)
+			break // only one config file can be present
+		}
+	}
+	if _, err := os.Stat(filepath.Join(destAbs, fileutil.IgnoreFileName)); err == nil {
+		copiedMetaFiles = append(copiedMetaFiles, fileutil.IgnoreFileName)
+	}
+
+	if len(copiedMetaFiles) > 0 {
+		fmt.Println()
+		if noKeepConfig {
+			for _, f := range copiedMetaFiles {
+				_ = os.Remove(filepath.Join(destAbs, f))
+			}
+			fmt.Printf("%s✓ Removed lancher config files from project%s\n", shared.ColorGreen, shared.ColorReset)
+		} else if !keepConfig {
+			fmt.Printf("%sLancher files found in project:%s\n", shared.ColorCyan+shared.ColorBold, shared.ColorReset)
+			for _, f := range copiedMetaFiles {
+				fmt.Printf("  • %s\n", f)
+			}
+			confirmed, err := shared.PromptConfirmWithDefault("Keep lancher config and ignore files in the project?", false)
+			if err != nil {
+				return shared.FormatError("failed to read confirmation")
+			}
+			if !confirmed {
+				for _, f := range copiedMetaFiles {
+					_ = os.Remove(filepath.Join(destAbs, f))
+				}
+				fmt.Printf("%s✓ Removed lancher config files from project%s\n", shared.ColorGreen, shared.ColorReset)
+			} else {
+				fmt.Printf("%s✓ Kept lancher config files in project%s\n", shared.ColorGreen, shared.ColorReset)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -332,19 +380,6 @@ func copyTemplate(srcPath, dstPath string, cfg *config.Config) error {
 		relPath, err := filepath.Rel(srcPath, path)
 		if err != nil {
 			return err
-		}
-
-		// Skip any lancher config files
-		fileName := filepath.Base(relPath)
-		for _, configFile := range config.ConfigFileNames {
-			if fileName == configFile {
-				return nil
-			}
-		}
-
-		// Skip .lancherignore file (never copy to destination)
-		if fileName == fileutil.IgnoreFileName {
-			return nil
 		}
 
 		// Skip .git directory (always excluded from templates)
