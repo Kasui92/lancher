@@ -63,6 +63,7 @@ Homebrew
 
 ```sh
 brew tap lancher-dev/lancher
+brew install lancher
 ```
 </details>
 
