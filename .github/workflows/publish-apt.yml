@@ -10,6 +10,8 @@ jobs:
     name: Publish to APT
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: write
 
     steps:
 
@@ -62,6 +64,16 @@ jobs:
 
             echo "Built: lancher_${VERSION}_${ARCH}.deb"
           done
+
+      - name: Upload .deb to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          files: |
+            lancher_${{ steps.version.outputs.version }}_amd64.deb
+            lancher_${{ steps.version.outputs.version }}_arm64.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout APT repo
         uses: actions/checkout@v4
