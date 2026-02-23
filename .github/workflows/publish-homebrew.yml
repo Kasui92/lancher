@@ -62,7 +62,7 @@ jobs:
         run: |
           cd homebrew-tap
           git config user.name  "lancher-bot"
-          git config user.email "me@lucapattocchio.dev"
+          git config user.email "info@lucapattocchio.dev"
           git add Formula/lancher.rb
           git diff --cached --stat
           git commit \
