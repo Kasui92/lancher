@@ -1,0 +1,134 @@
+name: Publish to Homebrew
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+jobs:
+  publish:
+    name: Publish to Homebrew
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Get version
+        id: version
+        run: |
+          RAW="${{ github.event.workflow_run.head_branch }}"
+          VERSION="${RAW#v}"
+          if [ -z "${VERSION}" ]; then
+            echo "ERROR: could not determine version from workflow_run event" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Deploying version: ${VERSION}"
+
+      - name: Download release binaries
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-darwin-amd64"
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-darwin-arm64"
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-amd64"
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-arm64"
+
+      - name: Calculate checksums
+        id: checksums
+        run: |
+          echo "sha256_darwin_amd64=$(sha256sum lancher-darwin-amd64 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_darwin_arm64=$(sha256sum lancher-darwin-arm64  | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_amd64=$(sha256sum lancher-linux-amd64   | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_arm64=$(sha256sum lancher-linux-arm64   | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: lancher-dev/homebrew-lancher
+          token: ${{ secrets.HOMEBREW_REPO_TOKEN }}
+          path: homebrew-tap
+
+      # The Formula is written with a Python one-liner to avoid heredoc
+      # indentation issues — Homebrew's `brew audit` rejects formulas with
+      # unexpected leading whitespace in the Ruby source.
+      - name: Update Formula
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          SHA_DARWIN_AMD64=${{ steps.checksums.outputs.sha256_darwin_amd64 }}
+          SHA_DARWIN_ARM64=${{ steps.checksums.outputs.sha256_darwin_arm64 }}
+          SHA_LINUX_AMD64=${{ steps.checksums.outputs.sha256_linux_amd64 }}
+          SHA_LINUX_ARM64=${{ steps.checksums.outputs.sha256_linux_arm64 }}
+
+          mkdir -p homebrew-tap/Formula
+
+          python3 - <<PYEOF
+import os
+
+version         = os.environ.get("VERSION",         "$VERSION")
+sha_darwin_amd  = os.environ.get("SHA_DARWIN_AMD64","$SHA_DARWIN_AMD64")
+sha_darwin_arm  = os.environ.get("SHA_DARWIN_ARM64","$SHA_DARWIN_ARM64")
+sha_linux_amd   = os.environ.get("SHA_LINUX_AMD64", "$SHA_LINUX_AMD64")
+sha_linux_arm   = os.environ.get("SHA_LINUX_ARM64", "$SHA_LINUX_ARM64")
+
+base_url = f"https://github.com/lancher-dev/lancher/releases/download/v{version}"
+
+formula = f'''\
+class Lancher < Formula
+  desc "A minimal local project template manager"
+  homepage "https://lancher.dev"
+  version "{version}"
+  license "MIT"
+
+  on_macos do
+    on_intel do
+      url "{base_url}/lancher-darwin-amd64"
+      sha256 "{sha_darwin_amd}"
+    end
+
+    on_arm do
+      url "{base_url}/lancher-darwin-arm64"
+      sha256 "{sha_darwin_arm}"
+    end
+  end
+
+  on_linux do
+    on_intel do
+      url "{base_url}/lancher-linux-amd64"
+      sha256 "{sha_linux_amd}"
+    end
+
+    on_arm do
+      url "{base_url}/lancher-linux-arm64"
+      sha256 "{sha_linux_arm}"
+    end
+  end
+
+  def install
+    bin.install "lancher-darwin-amd64" => "lancher" if OS.mac? && Hardware::CPU.intel?
+    bin.install "lancher-darwin-arm64" => "lancher" if OS.mac? && Hardware::CPU.arm?
+    bin.install "lancher-linux-amd64"  => "lancher" if OS.linux? && Hardware::CPU.intel?
+    bin.install "lancher-linux-arm64"  => "lancher" if OS.linux? && Hardware::CPU.arm?
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/lancher --version")
+  end
+end
+'''
+
+with open("homebrew-tap/Formula/lancher.rb", "w") as f:
+    f.write(formula)
+
+print("Formula written.")
+PYEOF
+
+      - name: Push Homebrew tap
+        run: |
+          cd homebrew-tap
+          git config user.name  "lancher-bot"
+          git config user.email "me@lucapattocchio.dev"
+          git add Formula/lancher.rb
+          git diff --cached --stat
+          git commit \
+            -m "chore: release v${{ steps.version.outputs.version }}" \
+            || echo "Nothing to commit, skipping."
+          git push
