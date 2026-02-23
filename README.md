@@ -42,7 +42,7 @@ Debian/Ubuntu
 
 ```sh
 # Add the GPG public key
-curl -fsSL https://lancher.dev/pubkey_KEYID.asc \
+curl -fsSL https://lancher.dev/pubkey_BA1285237A45B3E4.asc \
   | sudo gpg --dearmor -o /usr/share/keyrings/lancher.gpg
 
 # Add the repository source
