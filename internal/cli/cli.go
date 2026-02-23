@@ -69,12 +69,6 @@ func Run(args []string) error {
 			return template.RunListHelp()
 		}
 		return template.RunList(commandArgs)
-	case "upgrade":
-		// Check for help flag
-		if len(commandArgs) > 0 && (commandArgs[0] == "help" || commandArgs[0] == "-h" || commandArgs[0] == "--help") {
-			return commands.RunUpgradeHelp()
-		}
-		return commands.RunUpgrade(commandArgs)
 	case "-v", "--version":
 		fmt.Printf("lancher %s\n", version.Get())
 		return nil
@@ -98,7 +92,6 @@ func runHelp() error {
 	fmt.Printf("    %s%-20s%s %s\n", shared.ColorGreen, "create", shared.ColorReset, "Create a new project from template")
 	fmt.Printf("    %s%-20s%s %s\n", shared.ColorGreen, "template", shared.ColorReset, "Manage templates (add, list, update, remove)")
 	fmt.Printf("    %s%-20s%s %s\n", shared.ColorGreen, "templates", shared.ColorReset, "List all available templates")
-	fmt.Printf("    %s%-20s%s %s\n", shared.ColorGreen, "upgrade", shared.ColorReset, "Check for updates and upgrade to latest version")
 	fmt.Printf("    %shelp%s, %s-h%s             %s\n\n", shared.ColorGreen, shared.ColorReset, shared.ColorGreen, shared.ColorReset, "Print this help message")
 
 	fmt.Printf("%sOPTIONS:%s\n", shared.ColorCyan+shared.ColorBold, shared.ColorReset)
