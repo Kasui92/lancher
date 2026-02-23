@@ -1,0 +1,174 @@
+name: Publish to APT
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+jobs:
+  publish:
+    name: Publish to APT
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(gh release list \
+            --limit 1 \
+            --json tagName \
+            --jq '.[0].tagName' | sed 's/^v//')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download release binaries
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-amd64"
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-arm64"
+
+      - name: Create .deb packages
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          for ARCH in amd64 arm64; do
+            [ "$ARCH" = "amd64" ] && SRC="lancher-linux-amd64" \
+                                  || SRC="lancher-linux-arm64"
+
+            mkdir -p deb-${ARCH}/DEBIAN
+            mkdir -p deb-${ARCH}/usr/bin
+
+            cp "${SRC}" deb-${ARCH}/usr/bin/lancher
+            chmod 755   deb-${ARCH}/usr/bin/lancher
+
+            INSTALLED_SIZE=$(du -sk deb-${ARCH}/usr | awk '{print $1}')
+
+            cat > deb-${ARCH}/DEBIAN/control << EOF
+          Package: lancher
+          Version: ${VERSION}
+          Architecture: ${ARCH}
+          Maintainer: Kasui92 <info@lucapattocchio.dev>
+          Installed-Size: ${INSTALLED_SIZE}
+          Homepage: https://lancher.dev
+          Description: A minimal, local project-template manager written in Go.
+          EOF
+
+            dpkg-deb --build --root-owner-group \
+              deb-${ARCH} "lancher_${VERSION}_${ARCH}.deb"
+
+            echo "Built: lancher_${VERSION}_${ARCH}.deb"
+          done
+
+      - name: Checkout APT repo
+        uses: actions/checkout@v4
+        with:
+          repository: lancher-dev/apt
+          token: ${{ secrets.APT_REPO_TOKEN }}
+          path: apt-repo
+
+      # Keeps only the 3 most recent .deb per arch to avoid unbounded growth.
+      - name: Update pool
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p apt-repo/pool/main
+
+          cp "lancher_${VERSION}_amd64.deb" apt-repo/pool/main/
+          cp "lancher_${VERSION}_arm64.deb" apt-repo/pool/main/
+
+          for ARCH in amd64 arm64; do
+            ls -t apt-repo/pool/main/lancher_*_${ARCH}.deb 2>/dev/null \
+              | tail -n +4 \
+              | xargs -r rm -v
+          done
+
+      - name: Regenerate Packages indexes
+        run: |
+          cd apt-repo
+
+          for ARCH in amd64 arm64; do
+            mkdir -p "dists/stable/main/binary-${ARCH}"
+
+            dpkg-scanpackages \
+              --arch "${ARCH}" \
+              pool/main /dev/null \
+              > "dists/stable/main/binary-${ARCH}/Packages"
+
+            gzip -k -f "dists/stable/main/binary-${ARCH}/Packages"
+          done
+
+      - name: Generate Release file
+        run: |
+          cd apt-repo/dists/stable
+
+          VALID_UNTIL=$(date -u -d "+30 days" '+%a, %d %b %Y %H:%M:%S UTC' \
+            2>/dev/null || \
+            date -u -v +30d '+%a, %d %b %Y %H:%M:%S UTC')
+
+          cat > /tmp/apt-ftparchive-release.conf << EOF
+          APT::FTPArchive::Release::Origin        "lancher-dev";
+          APT::FTPArchive::Release::Label         "lancher";
+          APT::FTPArchive::Release::Suite         "stable";
+          APT::FTPArchive::Release::Codename      "stable";
+          APT::FTPArchive::Release::Architectures "amd64 arm64";
+          APT::FTPArchive::Release::Components    "main";
+          APT::FTPArchive::Release::Description   "lancher official APT repository";
+          APT::FTPArchive::Release::Valid-Until   "${VALID_UNTIL}";
+          EOF
+
+          apt-ftparchive \
+            -c /tmp/apt-ftparchive-release.conf \
+            release . > Release
+
+          echo "==> Release file preview:"
+          head -20 Release
+
+      # InRelease  = clearsigned (preferred by modern APT)
+      # Release.gpg = detached signature (kept for older clients)
+      # The key is imported into a temp GNUPGHOME to avoid polluting
+      # the runner's global keyring.
+      - name: Sign Release
+        run: |
+          export GNUPGHOME=$(mktemp -d)
+          chmod 700 "$GNUPGHOME"
+
+          echo "${{ secrets.APT_GPG_PRIVATE_KEY }}" \
+            | gpg --batch --import --quiet
+
+          cd apt-repo/dists/stable
+          rm -f InRelease Release.gpg
+
+          gpg --batch --yes \
+            --clearsign \
+            --armor \
+            --output InRelease \
+            Release
+
+          gpg --batch --yes \
+            --detach-sign \
+            --armor \
+            --output Release.gpg \
+            Release
+
+          rm -rf "$GNUPGHOME"
+
+          echo "==> Generated: InRelease, Release.gpg"
+
+      - name: Ensure CNAME and pubkeys dir
+        run: |
+          echo "repository.lancher.dev" > apt-repo/CNAME
+          mkdir -p apt-repo/pubkeys
+
+      - name: Push APT repo
+        run: |
+          cd apt-repo
+          git config user.name  "lancher-bot"
+          git config user.email "me@lucapattocchio.dev"
+          git add .
+          git diff --cached --stat
+          git commit \
+            -m "chore: release v${{ steps.version.outputs.version }}" \
+            || echo "Nothing to commit, skipping."
+          git push
