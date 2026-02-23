@@ -34,6 +34,30 @@ yay -Sy lancher
 ```
 </details>
 
+<br/>
+
+<details>
+<summary style="font-weight: bold">
+Debian/Ubuntu
+</summary>
+<br />
+
+```sh
+# Add the GPG public key
+curl -fsSL https://lancher.dev/pubkey_KEYID.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/lancher.gpg
+
+# Add the repository source
+echo "deb [signed-by=/usr/share/keyrings/lancher.gpg] \
+  https://repository.lancher.dev stable main" \
+  | sudo tee /etc/apt/sources.list.d/lancher.list
+
+# Install
+sudo apt update && sudo apt install lancher
+```
+</details>
+
+
 
 
 ## Documentation
