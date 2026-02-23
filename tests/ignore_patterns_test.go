@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Kasui92/lancher/internal/fileutil"
+	"github.com/lancher-dev/lancher/internal/fileutil"
 )
 
 // TestIgnoreStylePatterns verifies that ignore patterns with trailing slashes and wildcards work correctly
