@@ -55,7 +55,16 @@ sudo apt update && sudo apt install lancher
 ```
 </details>
 
+<details>
+<summary style="font-weight: bold">
+Homebrew
+</summary>
+<br />
 
+```sh
+brew tap lancher-dev/lancher
+```
+</details>
 
 
 ## Documentation
