@@ -1,4 +1,4 @@
-name: Publish
+name: Publish to AUR
 
 on:
   workflow_run:
@@ -6,7 +6,7 @@ on:
     types: [completed]
 
 jobs:
-  publish-aur:
+  publish:
     name: Publish to AUR
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
@@ -32,10 +32,8 @@ jobs:
       - name: Calculate checksums
         id: checksums
         run: |
-          SHA256_X86_64=$(sha256sum lancher-linux-amd64 | awk '{print $1}')
-          SHA256_AARCH64=$(sha256sum lancher-linux-arm64 | awk '{print $1}')
-          echo "sha256_x86_64=${SHA256_X86_64}" >> $GITHUB_OUTPUT
-          echo "sha256_aarch64=${SHA256_AARCH64}" >> $GITHUB_OUTPUT
+          echo "sha256_x86_64=$(sha256sum lancher-linux-amd64 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_aarch64=$(sha256sum lancher-linux-arm64 | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Update PKGBUILD
         run: |
@@ -59,7 +57,6 @@ jobs:
           sha256sums_aarch64=('${SHA256_AARCH64}')
 
           package() {
-            # install the binary
             install -Dm755 "\$srcdir/\$pkgname-\$pkgver-\$CARCH" "\$pkgdir/usr/bin/\$pkgname"
           }
           EOF
