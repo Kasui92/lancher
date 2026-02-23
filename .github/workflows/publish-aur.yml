@@ -18,16 +18,20 @@ jobs:
       - name: Get version
         id: version
         run: |
-          VERSION=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' | sed 's/^v//')
+          RAW="${{ github.event.workflow_run.head_branch }}"
+          VERSION="${RAW#v}"
+          if [ -z "${VERSION}" ]; then
+            echo "ERROR: could not determine version from workflow_run event" >&2
+            exit 1
+          fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Deploying version: ${VERSION}"
 
       - name: Download release binaries
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          wget https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-amd64
-          wget https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-arm64
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-amd64"
+          wget -q "https://github.com/lancher-dev/lancher/releases/download/v${VERSION}/lancher-linux-arm64"
 
       - name: Calculate checksums
         id: checksums

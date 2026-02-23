@@ -16,13 +16,14 @@ jobs:
       - name: Get version
         id: version
         run: |
-          VERSION=$(gh release list \
-            --limit 1 \
-            --json tagName \
-            --jq '.[0].tagName' | sed 's/^v//')
+          RAW="${{ github.event.workflow_run.head_branch }}"
+          VERSION="${RAW#v}"
+          if [ -z "${VERSION}" ]; then
+            echo "ERROR: could not determine version from workflow_run event" >&2
+            exit 1
+          fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Deploying version: ${VERSION}"
 
       - name: Download release binaries
         run: |
@@ -122,13 +123,8 @@ jobs:
             -c /tmp/apt-ftparchive-release.conf \
             release . > Release
 
-          echo "==> Release file preview:"
-          head -20 Release
-
       # InRelease  = clearsigned (preferred by modern APT)
       # Release.gpg = detached signature (kept for older clients)
-      # The key is imported into a temp GNUPGHOME to avoid polluting
-      # the runner's global keyring.
       - name: Sign Release
         run: |
           export GNUPGHOME=$(mktemp -d)
@@ -153,8 +149,6 @@ jobs:
             Release
 
           rm -rf "$GNUPGHOME"
-
-          echo "==> Generated: InRelease, Release.gpg"
 
       - name: Ensure CNAME and pubkeys dir
         run: |
