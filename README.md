@@ -34,8 +34,6 @@ yay -Sy lancher
 ```
 </details>
 
-<br/>
-
 <details>
 <summary style="font-weight: bold">
 Debian/Ubuntu
